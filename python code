@@ -1,0 +1,285 @@
+"""
+IX. Mini Project - Sleep Analytics
+-----------------------------------
+Domain      : Health & Sleep Analytics
+Aim         : Clean, process, and visualize global sleep health, lifestyle,
+              and disorder data using Python; build static visualizations to
+              derive insights on sleep patterns, quality, and disturbance
+              trends across age groups and seasons.
+
+This script:
+    1. Generates/loads a synthetic-but-realistic sleep dataset
+       (swap load_data() with pd.read_csv(...) to use your real dataset).
+    2. Cleans and aggregates the data.
+    3. Produces 7 static visualizations (saved as PNG in ./outputs).
+
+Run:
+    pip install pandas numpy matplotlib seaborn
+    python sleep_analytics.py
+"""
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
+import seaborn as sns
+
+# ----------------------------------------------------------------------
+# 0. SETUP
+# ----------------------------------------------------------------------
+sns.set_style("whitegrid")
+np.random.seed(42)
+
+OUT_DIR = "outputs"
+os.makedirs(OUT_DIR, exist_ok=True)
+
+
+def savefig(fig, name):
+    path = os.path.join(OUT_DIR, name)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    print(f"Saved: {path}")
+    plt.close(fig)
+
+
+# ----------------------------------------------------------------------
+# 1. DATA GENERATION / LOADING
+# ----------------------------------------------------------------------
+def load_data():
+    """
+    Replace the body of this function with:
+        df = pd.read_csv("sleep_health_dataset.csv")
+    to plug in your real dataset. The synthetic generator below produces
+    data shaped to match the patterns described in the project report.
+    """
+    n = 500
+    age_groups = ["Teens (13-18)", "Young Adult (19-30)", "Adult (31-45)",
+                  "Mid-Life (46-60)", "Senior (61-75)", "Elderly (76+)"]
+    seasons = ["Spring", "Summer", "Autumn", "Winter"]
+    occupations = ["Student", "Working Professional", "Retired"]
+
+    df = pd.DataFrame({
+        "person_id": range(1, n + 1),
+        "age_group": np.random.choice(age_groups, n),
+        "season": np.random.choice(seasons, n),
+        "occupation": np.random.choice(occupations, n, p=[0.4, 0.45, 0.15]),
+        "evening_screen_time_hrs": np.round(np.random.uniform(0.5, 8, n), 2),
+    })
+
+    # Sleep duration negatively correlated with screen time (+ noise by occupation)
+    occ_sensitivity = df["occupation"].map(
+        {"Student": -0.45, "Working Professional": -0.35, "Retired": -0.30}
+    )
+    df["sleep_duration_hrs"] = np.clip(
+        8.6 + occ_sensitivity * df["evening_screen_time_hrs"]
+        + np.random.normal(0, 0.3, n), 4.5, 9.5
+    )
+
+    # Sleep quality score by season (winter lowest, spring highest)
+    season_base = df["season"].map(
+        {"Spring": 0.80, "Summer": 0.76, "Autumn": 0.78, "Winter": 0.68}
+    )
+    season_spread = df["season"].map(
+        {"Spring": 0.06, "Summer": 0.08, "Autumn": 0.07, "Winter": 0.10}
+    )
+    df["sleep_quality_score"] = np.clip(
+        np.random.normal(season_base, season_spread), 0.4, 1.0
+    )
+
+    # Sleep stage composition by age group (REM/Deep decline, Light rises)
+    age_index = df["age_group"].map({g: i for i, g in enumerate(age_groups)})
+    df["rem_pct"] = np.clip(22 - age_index * 1.8 + np.random.normal(0, 1, n), 5, 30)
+    df["deep_pct"] = np.clip(20 - age_index * 2.2 + np.random.normal(0, 1, n), 3, 28)
+    df["light_pct"] = np.clip(50 + age_index * 1.4 + np.random.normal(0, 2, n), 40, 65)
+    df["sleep_efficiency_pct"] = np.clip(92 - age_index * 4.7 + np.random.normal(0, 2, n), 55, 96)
+
+    # Disorder category (fixed shares -> Fig 6)
+    disorder_categories = ["Insomnia", "Sleep Apnea", "Restless Leg Syndrome",
+                            "Narcolepsy", "Circadian Rhythm Disorder"]
+    disorder_probs = [0.34, 0.27, 0.16, 0.09, 0.14]
+    df["disorder_category"] = np.random.choice(disorder_categories, n, p=disorder_probs)
+
+    return df, age_groups, seasons
+
+
+def monthly_disturbances():
+    """Synthetic monthly disturbance counts peaking in June, dipping Apr/Aug."""
+    months = np.arange(1, 13)
+    base = np.array([48, 44, 47, 30, 33, 53, 40, 29, 41, 45, 31, 42])
+    return months, base
+
+
+def seasonal_disorder_cases():
+    return pd.Series({"Spring": 312, "Summer": 289, "Autumn": 301, "Winter": 356})
+
+
+def transition_matrix():
+    stages = ["Awake", "Light", "Deep", "REM"]
+    matrix = np.array([
+        [0.10, 0.70, 0.05, 0.15],
+        [0.08, 0.55, 0.20, 0.17],
+        [0.03, 0.35, 0.55, 0.07],
+        [0.12, 0.60, 0.05, 0.23],
+    ])
+    return pd.DataFrame(matrix, index=stages, columns=stages)
+
+
+# ----------------------------------------------------------------------
+# 2. VISUALIZATIONS
+# ----------------------------------------------------------------------
+def fig1_sleep_stage_by_age(df, age_groups):
+    agg = df.groupby("age_group")[
+        ["rem_pct", "deep_pct", "light_pct", "sleep_efficiency_pct"]
+    ].mean().reindex(age_groups)
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    x = np.arange(len(age_groups))
+    width = 0.2
+    colors = ["#e74c3c", "#1abc9c", "#16697a", "#a6e3e9"]
+    labels = ["REM Sleep %", "Deep Sleep %", "Light Sleep %", "Sleep Efficiency %"]
+
+    for i, (col, label, color) in enumerate(zip(agg.columns, labels, colors)):
+        ax.bar(x + (i - 1.5) * width, agg[col], width, label=label,
+               color=color, edgecolor="black", linewidth=0.5)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels([g.replace(" (", "\n(") for g in age_groups], fontsize=8)
+    ax.set_xlabel("Age Group")
+    ax.set_ylabel("Index Value")
+    ax.set_title("Sleep Stage Components by Age Group", fontweight="bold")
+    ax.legend()
+    savefig(fig, "fig1_sleep_stage_by_age.png")
+
+
+def fig2_disturbance_by_month(months, values):
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(months, values, color="#b02a37", marker="s", markersize=5, linewidth=1.5)
+    ax.fill_between(months, values, color="#f4a6b0", alpha=0.6)
+    ax.set_xticks(months)
+    ax.set_xlabel("Month")
+    ax.set_ylabel("Number of Reported Disturbances")
+    ax.set_title("Sleep Disturbance Frequency by Month", fontweight="bold")
+    ax.set_ylim(0, 60)
+    savefig(fig, "fig2_disturbance_by_month.png")
+
+
+def fig3_quality_by_season(df, seasons):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    palette = {"Spring": "#8ecae6", "Summer": "#f6a5a5",
+               "Autumn": "#95d5b2", "Winter": "#f9f3a5"}
+    sns.boxplot(data=df, x="season", y="sleep_quality_score", order=seasons,
+                notch=True, hue="season", palette=palette, legend=False, ax=ax)
+    ax.set_xlabel("")
+    ax.set_ylabel("Sleep Quality Score")
+    ax.set_title("Sleep Quality Score Distribution by Season", fontweight="bold")
+    savefig(fig, "fig3_quality_by_season.png")
+
+
+def fig4_transition_heatmap(tm):
+    fig, ax = plt.subplots(figsize=(7, 6))
+    sns.heatmap(tm, annot=True, fmt=".2f", cmap="RdPu", cbar_kws={"label": "Transition Probability"},
+                linewidths=0.5, linecolor="white", ax=ax)
+    ax.set_xlabel("Transition To")
+    ax.set_ylabel("Transition From")
+    ax.set_title("Sleep Stage Transition Patterns", fontweight="bold")
+    savefig(fig, "fig4_transition_heatmap.png")
+
+
+def fig5_seasonal_disorder_cases(cases, seasons):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    colors = ["#f4a09c", "#f9c66b", "#a9c9f4", "#c6a4f4"]
+    bars = ax.bar(seasons, cases.reindex(seasons), color=colors, edgecolor="black", linewidth=0.5)
+    for bar in bars:
+        h = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, h + 4, f"{int(h)}",
+                ha="center", fontweight="bold")
+    ax.set_ylabel("Number of Reported Cases")
+    ax.set_title("Seasonal Sleep Disorder Case Distribution", fontweight="bold")
+    ax.set_ylim(0, max(cases) * 1.15)
+    savefig(fig, "fig5_seasonal_disorder_cases.png")
+
+
+def fig6_disorder_category_share(df):
+    counts = df["disorder_category"].value_counts()
+    counts = counts / counts.sum() * 100
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+    colors = ["#3d6fa5", "#8e3b8e", "#e08a2b", "#c0392b", "#4a9e5c"]
+    wedges, _, autotexts = ax.pie(
+        counts, autopct="%1.1f%%", startangle=90, pctdistance=0.82,
+        colors=colors, wedgeprops=dict(width=0.4, edgecolor="white")
+    )
+    ax.legend(wedges, counts.index, title="Category", loc="center left",
+              bbox_to_anchor=(1, 0.5), fontsize=8)
+    ax.set_title("Sleep Disorder Category Share", fontweight="bold")
+    savefig(fig, "fig6_disorder_category_share.png")
+
+
+def fig7_duration_vs_screen_time(df):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sns.scatterplot(
+        data=df, x="evening_screen_time_hrs", y="sleep_duration_hrs",
+        hue="occupation", ax=ax, alpha=0.8, s=40
+    )
+    ax.set_xlabel("Evening Screen Time (hours)")
+    ax.set_ylabel("Average Sleep Duration (hours)")
+    ax.set_title("Sleep Duration vs. Evening Screen Time", fontweight="bold")
+    ax.legend(title=None)
+    savefig(fig, "fig7_duration_vs_screen_time.png")
+
+
+# ----------------------------------------------------------------------
+# 3. INSIGHTS
+# ----------------------------------------------------------------------
+def print_insights():
+    insights = [
+        "REM and deep sleep percentages decline steadily with age, while light "
+        "sleep share and sleep-onset difficulty increase, and overall sleep "
+        "efficiency drops from about 92% in teenagers to under 70% in the elderly.",
+
+        "Sleep disturbances peak in June and dip in April and August, suggesting "
+        "a seasonal, possibly temperature- or daylight-linked pattern rather than "
+        "a purely random distribution.",
+
+        "Winter shows the lowest median sleep quality score and the widest spread, "
+        "while spring shows the highest and most consistent scores.",
+
+        "The transition heatmap shows sleep is dominated by frequent shifts into "
+        "light sleep from every stage, while deep sleep is the most 'sticky' "
+        "stage once entered (55% self-transition probability).",
+
+        "Insomnia and sleep apnea together account for over 60% of reported sleep "
+        "disorder cases, making them the priority targets for intervention.",
+
+        "Evening screen time shows a clear negative relationship with sleep "
+        "duration across all occupation groups, with students showing the "
+        "steepest sensitivity.",
+    ]
+    print("\nINSIGHTS:")
+    for i, ins in enumerate(insights, 1):
+        print(f"{i}. {ins}\n")
+
+
+# ----------------------------------------------------------------------
+# 4. MAIN
+# ----------------------------------------------------------------------
+def main():
+    df, age_groups, seasons = load_data()
+    months, disturbance_values = monthly_disturbances()
+    disorder_cases = seasonal_disorder_cases()
+    tm = transition_matrix()
+
+    fig1_sleep_stage_by_age(df, age_groups)
+    fig2_disturbance_by_month(months, disturbance_values)
+    fig3_quality_by_season(df, seasons)
+    fig4_transition_heatmap(tm)
+    fig5_seasonal_disorder_cases(disorder_cases, seasons)
+    fig6_disorder_category_share(df)
+    fig7_duration_vs_screen_time(df)
+
+    print_insights()
+    print("RESULT: Thus, the given program was written and executed successfully.")
+
+
+if __name__ == "__main__":
+    main()
